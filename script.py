@@ -161,8 +161,8 @@ def segment_metrics(raster, change, nonchange):
     nonchange = gpd.read_file(nonchange)
     res = rio.open(raster)
     
-    change_mask, _ = mask(res, change.geometry, crop=True, nodata=99999.0)
-    nonchange_mask, _ = mask(res, nonchange.geometry, crop=True, nodata=99999.0)
+    change_mask, _ = mask(res, change.geometry, crop=True, nodata=2)
+    nonchange_mask, _ = mask(res, nonchange.geometry, crop=True, nodata=2)
     res.close()
     
     true_positive = (change_mask == 1).sum()
@@ -175,7 +175,7 @@ def segment_metrics(raster, change, nonchange):
     f1 = (2 * precision * recall)/(precision + recall)
     accuracy = (true_positive + true_negative)/(true_negative + true_positive + false_negative + false_positive)
     
-    return {'f1': f1, 'precision': precision, 'recall': recall, 'accuracy': accuracy}
+    return {'f1': f1, 'precision': precision, 'recall': recall, 'accuracy': accuracy}, change_mask, nonchange_mask
     
 Xwav = apply_wavelet(X)
 Ywav = apply_wavelet(Y)
@@ -341,10 +341,10 @@ with rio.open(
 ) as dst:
     dst.write(bin_twecs, 1)
     
-metric_ecs = segment_metrics('assets/bin_ecs.tif', "shp/Change.shp", "shp/NonChange.shp")
-metric_tecs = segment_metrics('assets/bin_tecs.tif', "shp/Change.shp", "shp/NonChange.shp")
-metric_wecs = segment_metrics('assets/bin_wecs.tif', "shp/Change.shp", "shp/NonChange.shp")
-metric_twecs = segment_metrics('assets/bin_twecs.tif', "shp/Change.shp", "shp/NonChange.shp")
+metric_ecs, ecs_change, ecs_nonchange = segment_metrics('assets/bin_ecs.tif', "shp/Change.shp", "shp/NonChange.shp")
+metric_tecs, tecs_change, tecs_nonchange = segment_metrics('assets/bin_tecs.tif', "shp/Change.shp", "shp/NonChange.shp")
+metric_wecs, wecs_change, wecs_nonchange = segment_metrics('assets/bin_wecs.tif', "shp/Change.shp", "shp/NonChange.shp")
+metric_twecs, twecs_change, twecs_nonchange = segment_metrics('assets/bin_twecs.tif', "shp/Change.shp", "shp/NonChange.shp")
 
 bin_tecsw = segment_li(waveleted(tecs))
 bin_wecsw = segment_li(waveleted(wecs))
@@ -389,3 +389,10 @@ ax[1, 0].set_title("TECSW")
 ax[1, 1].set_title("WECSW")
 fig.tight_layout()
 plt.show()
+
+change = gpd.read_file("shp/Change.shp")
+nonchange = gpd.read_file("shp/NonChange.shp")
+
+with rio.open('assets/bin_ecs.tif') as src:
+    change_mask, _ = mask(src, change.geometry, crop=True, nodata=2)
+    nonchange_mask, _ = mask(src, nonchange.geometry, crop=True, nodata=2)
