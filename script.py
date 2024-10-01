@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import os
 import re
 from skimage.filters import threshold_otsu, threshold_li
-from skimage.restoration import denoise_wavelet
+from skimage.restoration import denoise_wavelet, denoise_tv_chambolle
 import rasterio as rio
 from rasterio.mask import mask
 import geopandas as gpd
@@ -71,7 +71,6 @@ def apply_along_axis_0(func1d, arr):
         _apply_along_axis_0(func1d, arr, out)
         return out
 
-
 @njit
 def _apply_along_axis_0(func1d, arr, out):
     """Like calling func1d(arr, axis=0, out=out). Require arr to be 2d or bigger."""
@@ -85,11 +84,9 @@ def _apply_along_axis_0(func1d, arr, out):
         for i, out_slice in enumerate(out):
             _apply_along_axis_0(func1d, arr[:, i], out_slice)
 
-
 @njit
 def nb_mean_axis_0(arr):
     return apply_along_axis_0(np.mean, arr)
-
 
 # ECS definition
 @njit
@@ -124,14 +121,6 @@ def ECS(x, smooth_x=None):
     
     return R
 
-def waveleted(x):
-    xwav = denoise_wavelet(
-            x, 
-            wavelet="haar",
-            wavelet_levels=2
-    )
-    return xwav
-
 def apply_wavelet(x):
     xwav = np.ndarray(x.shape)
     t = xwav.shape[0]
@@ -144,6 +133,17 @@ def apply_wavelet(x):
         print(str(i+1)+"/"+str(t), end="\r")
     return xwav
 
+def apply_tv(x):
+    xtv = np.ndarray(x.shape)
+    t = xtv.shape[0]
+    for i in range(t):
+        xtv[i, :, :] = denoise_tv_chambolle(
+            x[i, :, :],
+            weight=2
+        )
+        print(str(i+1)+"/"+str(t), end="\r")
+    return xtv
+        
 def segment_otsu(x):
     th = threshold_otsu(x)
     binary = x > th
@@ -177,14 +177,55 @@ def segment_metrics(raster, change, nonchange):
     
     return {'f1': f1, 'precision': precision, 'recall': recall, 'accuracy': accuracy}, change_mask, nonchange_mask
     
+def save_with_rio(path, img, template):
+    with rio.open(
+         path,
+         'w',
+         driver='GTiff',
+         height=img.shape[0],
+         width=img.shape[1],
+         count=1,
+         dtype=img.dtype,
+         crs='+proj=latlong',
+         transform=template.transform
+    ) as dst:
+        dst.write(img, 1)
+        
+    return True
+
+# total variation denoising
+test = denoise_tv_chambolle(X[0], weight=2)
+fig, ax = plt.subplots(1, 2)
+ax[0].imshow(X[0], cmap="gray")
+ax[1].imshow(test, cmap="gray")
+ax[0].set_title("Original")
+ax[1].set_title("TV")
+fig.tight_layout()
+plt.show()
+
+# wavelet denoising
+test = denoise_wavelet(X[0], wavelet='haar', wavelet_levels=2)
+fig, ax = plt.subplots(1, 2)
+ax[0].imshow(X[0], cmap="gray")
+ax[1].imshow(test, cmap="gray")
+ax[0].set_title("Original")
+ax[1].set_title("Wavelet")
+fig.tight_layout()
+plt.show()
+
+del test
+del ax
+del fig
+
 Xwav = apply_wavelet(X)
-Ywav = apply_wavelet(Y)
-print("Wavelets done.")
+Xtv = apply_tv(X)
+#Ywav = apply_wavelet(Y)
+print("Filtering done.")
 
 ecs = ECS(X)
 wecs = ECS(X, Xwav)
-tecs = ECS(X, Y)
-twecs = ECS(X, Ywav)
+tvecs = ECS(X, Xtv)
+specs = ECS(X, Y)
 print("ECS done.")
 
 # ou
@@ -193,28 +234,28 @@ with rio.open('assets/ecs.tif') as src:
     ecs = src.read(1)
 with rio.open('assets/wecs.tif') as src:
     wecs = src.read(1)
-with rio.open('assets/tecs.tif') as src:
-    tecs = src.read(1)
-with rio.open('assets/twecs.tif') as src:
-    twecs = src.read(1)
+with rio.open('assets/tvecs.tif') as src:
+    tvecs = src.read(1)
+with rio.open('assets/specs.tif') as src:
+    specs = src.read(1)
 '''
 
 fig, ax = plt.subplots(2, 2)
 ax[0, 0].imshow(ecs, cmap="gray")
 ax[0, 1].imshow(wecs, cmap="gray")
-ax[1, 0].imshow(tecs, cmap="gray")
-ax[1, 1].imshow(twecs, cmap="gray")
+ax[1, 0].imshow(tvecs, cmap="gray")
+ax[1, 1].imshow(specs, cmap="gray")
 ax[0, 0].set_title("ECS")
 ax[0, 1].set_title("WECS")
-ax[1, 0].set_title("TECS")
-ax[1, 1].set_title("TWECS")
+ax[1, 0].set_title("TVECS")
+ax[1, 1].set_title("SPECS")
 fig.tight_layout()
 plt.show()
 
 del X
 del Y
 del Xwav
-del Ywav
+del Xtv
 
 with rio.open(
     'assets/ecs.tif',
@@ -243,45 +284,45 @@ with rio.open(
     dst.write(wecs, 1)
     
 with rio.open(
-    'assets/tecs.tif',
+    'assets/tvecs.tif',
     'w',
     driver='GTiff',
-    height=tecs.shape[0],
-    width=tecs.shape[1],
+    height=tvecs.shape[0],
+    width=tvecs.shape[1],
     count=1,
-    dtype=tecs.dtype,
+    dtype=tvecs.dtype,
     crs='+proj=latlong',
     transform=temp.transform
 ) as dst:
-    dst.write(tecs, 1)
+    dst.write(tvecs, 1)
     
 with rio.open(
-    'assets/twecs.tif',
+    'assets/specs.tif',
     'w',
     driver='GTiff',
-    height=twecs.shape[0],
-    width=twecs.shape[1],
+    height=specs.shape[0],
+    width=specs.shape[1],
     count=1,
-    dtype=twecs.dtype,
+    dtype=specs.dtype,
     crs='+proj=latlong',
     transform=temp.transform
 ) as dst:
-    dst.write(twecs, 1)
+    dst.write(specs, 1)
 
-bin_ecs = segment_li(ecs)
-bin_wecs = segment_li(wecs)
-bin_tecs = segment_li(tecs)
-bin_twecs = segment_li(twecs)
+bin_ecs = segment_otsu(ecs)
+bin_wecs = segment_otsu(wecs)
+bin_tvecs = segment_otsu(tvecs)
+bin_specs = segment_otsu(specs)
 
 fig, ax = plt.subplots(2, 2)
 ax[0, 0].imshow(bin_ecs, cmap="gray")
 ax[0, 1].imshow(bin_wecs, cmap="gray")
-ax[1, 0].imshow(bin_tecs, cmap="gray")
-ax[1, 1].imshow(bin_twecs, cmap="gray")
+ax[1, 0].imshow(bin_tvecs, cmap="gray")
+ax[1, 1].imshow(bin_specs, cmap="gray")
 ax[0, 0].set_title("ECS")
 ax[0, 1].set_title("WECS")
-ax[1, 0].set_title("TECS")
-ax[1, 1].set_title("TWECS")
+ax[1, 0].set_title("TVECS")
+ax[1, 1].set_title("SPECS")
 ax[0, 0].axis('off')
 ax[0, 1].axis('off')
 ax[1, 0].axis('off')
@@ -316,83 +357,32 @@ with rio.open(
     dst.write(bin_wecs, 1)
     
 with rio.open(
-    'assets/bin_tecs.tif',
+    'assets/bin_tvecs.tif',
     'w',
     driver='GTiff',
-    height=bin_tecs.shape[0],
-    width=bin_tecs.shape[1],
+    height=bin_tvecs.shape[0],
+    width=bin_tvecs.shape[1],
     count=1,
-    dtype=bin_tecs.dtype,
+    dtype=bin_tvecs.dtype,
     crs='+proj=latlong',
     transform=temp.transform
 ) as dst:
-    dst.write(bin_tecs, 1)
+    dst.write(bin_tvecs, 1)
     
 with rio.open(
-    'assets/bin_twecs.tif',
+    'assets/bin_specs.tif',
     'w',
     driver='GTiff',
-    height=bin_twecs.shape[0],
-    width=bin_twecs.shape[1],
+    height=bin_specs.shape[0],
+    width=bin_specs.shape[1],
     count=1,
-    dtype=bin_twecs.dtype,
+    dtype=bin_specs.dtype,
     crs='+proj=latlong',
     transform=temp.transform
 ) as dst:
-    dst.write(bin_twecs, 1)
+    dst.write(bin_specs, 1)
     
 metric_ecs, ecs_change, ecs_nonchange = segment_metrics('assets/bin_ecs.tif', "shp/Change.shp", "shp/NonChange.shp")
-metric_tecs, tecs_change, tecs_nonchange = segment_metrics('assets/bin_tecs.tif', "shp/Change.shp", "shp/NonChange.shp")
+metric_tvecs, tvecs_change, tvecs_nonchange = segment_metrics('assets/bin_tvecs.tif', "shp/Change.shp", "shp/NonChange.shp")
 metric_wecs, wecs_change, wecs_nonchange = segment_metrics('assets/bin_wecs.tif', "shp/Change.shp", "shp/NonChange.shp")
-metric_twecs, twecs_change, twecs_nonchange = segment_metrics('assets/bin_twecs.tif', "shp/Change.shp", "shp/NonChange.shp")
-
-bin_tecsw = segment_li(waveleted(tecs))
-bin_wecsw = segment_li(waveleted(wecs))
-
-with rio.open(
-    'assets/bin_tecsw.tif',
-    'w',
-    driver='GTiff',
-    height=bin_tecsw.shape[0],
-    width=bin_tecsw.shape[1],
-    count=1,
-    dtype=bin_tecsw.dtype,
-    crs='+proj=latlong',
-    transform=temp.transform
-) as dst:
-    dst.write(bin_tecsw, 1)
-    
-with rio.open(
-    'assets/bin_wecsw.tif',
-    'w',
-    driver='GTiff',
-    height=bin_wecsw.shape[0],
-    width=bin_wecsw.shape[1],
-    count=1,
-    dtype=bin_wecsw.dtype,
-    crs='+proj=latlong',
-    transform=temp.transform
-) as dst:
-    dst.write(bin_wecsw, 1)
-
-metric_wecsw = segment_metrics('assets/bin_wecsw.tif', "shp/Change.shp", "shp/NonChange.shp")
-metric_tecsw = segment_metrics('assets/bin_tecsw.tif', "shp/Change.shp", "shp/NonChange.shp")
-
-fig, ax = plt.subplots(2, 2)
-ax[0, 0].imshow(bin_wecs, cmap="gray")
-ax[0, 1].imshow(bin_twecs, cmap="gray")
-ax[1, 0].imshow(bin_tecsw, cmap="gray")
-ax[1, 1].imshow(bin_wecsw, cmap="gray")
-ax[0, 0].set_title("WECS")
-ax[0, 1].set_title("TWECS")
-ax[1, 0].set_title("TECSW")
-ax[1, 1].set_title("WECSW")
-fig.tight_layout()
-plt.show()
-
-change = gpd.read_file("shp/Change.shp")
-nonchange = gpd.read_file("shp/NonChange.shp")
-
-with rio.open('assets/bin_ecs.tif') as src:
-    change_mask, _ = mask(src, change.geometry, crop=True, nodata=2)
-    nonchange_mask, _ = mask(src, nonchange.geometry, crop=True, nodata=2)
+metric_specs, specs_change, specs_nonchange = segment_metrics('assets/bin_specs.tif', "shp/Change.shp", "shp/NonChange.shp")
