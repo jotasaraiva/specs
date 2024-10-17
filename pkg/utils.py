@@ -1,7 +1,8 @@
 import rasterio as rio
 import numpy as np
 from skimage.filters import threshold_otsu, threshold_li
-from skimage.restoration import denoise_wavelet, denoise_tv_chambolle
+from skimage.restoration import denoise_tv_chambolle
+import pywt
 import geopandas as gpd
 from numba import njit
 from rasterio.mask import mask
@@ -76,10 +77,11 @@ def apply_wavelet(x):
     xwav = np.ndarray(x.shape)
     t = xwav.shape[0]
     for i in range(t):
-        xwav[i, :, :] = denoise_wavelet(
+        xwav[i, :, :] = pywt.swt2(
             x[i, :, :], 
             wavelet="haar", 
-            wavelet_levels=2
+            level=2,
+            start_level=0
         )
         print(str(i+1)+"/"+str(t), end="\r")
     return xwav

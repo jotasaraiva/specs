@@ -1,8 +1,9 @@
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import os
 import re
-from skimage.restoration import denoise_wavelet, denoise_tv_chambolle
+from skimage.restoration import denoise_tv_chambolle
 import pywt
 import rasterio as rio
 from pkg import utils
@@ -53,8 +54,12 @@ del n
 del i
 del directory
 
+# reduce image for wavelet
+X = X[:,:,:-3]
+Y = Y[:,:,:-3]
+
 # total variation denoising
-test = X[0,:,:-3]
+test = X[0]
 test_tv = denoise_tv_chambolle(test, weight=3)
 test_wav = pywt.swt2(test, wavelet='haar', level=2, start_level=0)
 fig, ax = plt.subplots(1, 3)
@@ -70,7 +75,7 @@ ax[2].axis('off')
 fig.tight_layout()
 plt.show()
 
-del test;
+del test
 del test_wav
 del test_tv
 del ax
@@ -96,9 +101,12 @@ with rio.open('assets/wecs.tif') as src:
     wecs = src.read(1)
 with rio.open('assets/tvecs.tif') as src:
     tvecs = src.read(1)
-with rio.open('assets/specs.tif') as src:
-    specs = src.read(1)
+with rio.open('assets/stvecs.tif') as src:
+    stvecs = src.read(1)
 '''
+
+mean_original = X.mean(axis=0)
+mean_stv = Ytv.mean(axis=0)
 
 del X
 del Y
@@ -161,3 +169,57 @@ metric_tvecs, tvecs_change, tvecs_nonchange = utils.segment_metrics('assets/bin_
 metric_wecs, wecs_change, wecs_nonchange = utils.segment_metrics('assets/bin_wecs.tif', "shp/Change.shp", "shp/NonChange.shp")
 metric_specs, specs_change, specs_nonchange = utils.segment_metrics('assets/bin_specs.tif', "shp/Change.shp", "shp/NonChange.shp")
 metric_stvecs, stvecs_change, stvecs_nonchange = utils.segment_metrics('assets/bin_stvecs.tif', "shp/Change.shp", "shp/NonChange.shp")
+
+metric_ecs["model"] = "ECS"
+metric_wecs["model"] = "WECS"
+metric_specs["model"] = "SPECS"
+metric_tvecs["model"] = "TVECS"
+metric_stvecs["model"] = "STVECS"
+
+# visualizations
+
+## metrics
+metrics = pd.DataFrame([metric_ecs, metric_wecs, metric_specs, metric_tvecs, metric_stvecs])
+metrics.to_csv("assets/metrics.csv")
+
+## model images
+ax1 = plt.subplot2grid(shape=(2,6), loc=(0,0), colspan=2)
+ax2 = plt.subplot2grid((2,6), (0,2), colspan=2)
+ax3 = plt.subplot2grid((2,6), (0,4), colspan=2)
+ax4 = plt.subplot2grid((2,6), (1,1), colspan=2)
+ax5 = plt.subplot2grid((2,6), (1,3), colspan=2)
+ax1.imshow(bin_ecs, interpolation='nearest', cmap='cividis')
+ax1.set_axis_off()
+ax1.set_title('ECS')
+ax2.imshow(bin_wecs, interpolation='nearest', cmap='cividis')
+ax2.set_axis_off()
+ax2.set_title('WECS')
+ax3.imshow(bin_specs, interpolation='nearest', cmap='cividis')
+ax3.set_axis_off()
+ax3.set_title('SPECS')
+ax4.imshow(bin_tvecs, interpolation='nearest', cmap='cividis')
+ax4.set_axis_off()
+ax4.set_title('TVECS')
+ax5.imshow(bin_stvecs, interpolation='nearest', cmap='cividis')
+ax5.set_axis_off()
+ax5.set_title('SPTVECS')
+plt.tight_layout()
+plt.savefig("assets/models.png", dpi=300, transparent=True)
+
+## mean images
+fig, axs = plt.subplots(1, 3, figsize=(15, 6))  # 1 row, 3 columns
+
+axs[0].imshow(mean_original, cmap='gray')
+axs[0].axis('off')
+axs[0].set_title('Média Original', fontsize = 22)
+
+axs[1].imshow(mean_stv, cmap='gray')
+axs[1].axis('off')
+axs[1].set_title('Média Pós-Filtros', fontsize = 22)
+
+axs[2].imshow(stvecs, cmap='gray')
+axs[2].axis('off')
+axs[2].set_title('Correlações de Mudança', fontsize = 22)
+
+plt.tight_layout()
+plt.savefig("assets/means.png", dpi=300, transparent=True)
